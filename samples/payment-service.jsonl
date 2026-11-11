@@ -1,0 +1,6 @@
+{"ts":1794298500050,"level":30,"msg":"Charge request received","trace_id":"tr-1001","path":"/api/payments/charge","amount":129.9}
+{"ts":1794298500060,"level":20,"msg":"Calling card processor acquirer-gw","trace_id":"tr-1001"}
+{"ts":1794298503050,"level":40,"msg":"Card processor slow, still waiting","trace_id":"tr-1001","elapsed_ms":3000}
+{"ts":1794298503100,"level":50,"msg":"Card processor call failed: ETIMEDOUT","trace_id":"tr-1001","path":"/api/payments/charge"}
+{"ts":1794298803100,"level":40,"msg":"TLS certificate for acquirer-gw expires in 10 days"}
+{"ts":1794299412020,"level":30,"msg":"Charge request received","trace_id":"tr-1050","path":"/api/payments/charge","amount":42}

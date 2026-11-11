@@ -1,0 +1,6 @@
+2026-11-10 08:19:58,700 WARN [db-pool] connection pool 90% utilised (45/50)
+2026-11-10 08:20:01,850 ERROR [db-pool] DB_CONN_TIMEOUT acquiring connection after 3000ms
+2026-11-10 08:20:02,900 ERROR [http] POST /api/inventory/reserve -> 503 Service Unavailable: no database connection reason=DB_CONN_TIMEOUT
+    at Pool.acquire (pool.js:112)
+    at ReserveHandler.handle (reserve.js:40)
+2026-11-10 08:25:00,000 INFO [scheduler] nightly stock sync completed items=18233

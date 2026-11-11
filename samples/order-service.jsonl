@@ -1,0 +1,7 @@
+{"time":"2026-11-10T08:15:00.030Z","level":"info","msg":"Creating order","traceId":"tr-1001","path":"/api/orders","userId":"u-42"}
+{"time":"2026-11-10T08:15:00.045Z","level":"info","msg":"Calling payment-service /api/payments/charge","traceId":"tr-1001"}
+{"time":"2026-11-10T08:15:03.120Z","level":"error","msg":"Payment call failed: upstream timeout after 3000ms","traceId":"tr-1001","code":"PAYMENT_TIMEOUT"}
+{"time":"2026-11-10T08:20:02.010Z","level":"info","msg":"Reserving stock","requestId":"req-8c01","path":"/api/inventory/reserve"}
+{"time":"2026-11-10T08:20:02.930Z","level":"error","msg":"inventory-service returned 503 for /api/inventory/reserve","requestId":"req-8c01","code":"INVENTORY_UNAVAILABLE"}
+{"time":"2026-11-10T08:30:12.010Z","level":"info","msg":"Creating order","traceId":"tr-1050","path":"/api/orders"}
+{"time":"2026-11-10T08:30:12.080Z","level":"info","msg":"Order created","traceId":"tr-1050","orderId":"o-981"}
