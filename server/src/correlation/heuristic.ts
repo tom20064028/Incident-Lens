@@ -2,9 +2,10 @@ import { isAtLeast, type LogEvent } from '../types.js';
 import type { EventFeatures } from './features.js';
 
 /**
- * Weights sum to 1.0. Time proximity + severity + service mention max out at 0.45, which is
- * below the default 0.5 threshold on purpose: two events are never linked just for being
- * close in time; they also need a shared endpoint, error code, or keywords.
+ * Weights sum to 1.0. A pair is only eligible when it shares at least one piece of content
+ * evidence (endpoint, error code, or keywords); time proximity, severity and service mentions
+ * can strengthen a link but never create one. This holds for any minConfidence, so lowering
+ * the threshold in the UI cannot make events link just for being close in time.
  */
 export const WEIGHTS = {
   time: 0.3,
@@ -22,9 +23,9 @@ export interface HeuristicScore {
 
 const intersect = <T>(a: Set<T>, b: Set<T>): T[] => [...a].filter((x) => b.has(x));
 
-/** Does `text` mention `service` by full name or by its stem ("inventory-service" -> "inventory")? */
 const servicePatterns = new Map<string, RegExp>();
 
+/** Does `text` mention `service` by full name or by its stem ("inventory-service" -> "inventory")? */
 export function mentionsService(text: string, service: string): boolean {
   let pattern = servicePatterns.get(service);
   if (!pattern) {
@@ -40,7 +41,8 @@ export function mentionsService(text: string, service: string): boolean {
 
 /**
  * Score how likely two events (without a shared correlation ID) are part of the same incident.
- * Returns null when they are outside the time window or the pair is not eligible.
+ * Returns null when they are outside the time window, neither is ERROR+, or they share no
+ * content evidence (endpoint, error code, keywords).
  */
 export function scorePair(
   a: LogEvent,
@@ -53,25 +55,27 @@ export function scorePair(
   if (dt > windowMs) return null;
   if (!isAtLeast(a.level, 'ERROR') && !isAtLeast(b.level, 'ERROR')) return null;
 
+  const paths = intersect(fa.paths, fb.paths);
+  const codes = intersect(fa.codes, fb.codes);
+  const words = intersect(fa.keywords, fb.keywords);
+  if (!paths.length && !codes.length && !words.length) return null;
+
   let score = 0;
   const reasons: string[] = [];
 
   score += WEIGHTS.time * (1 - dt / windowMs);
   reasons.push(`${dt} ms apart (window ${windowMs} ms)`);
 
-  const paths = intersect(fa.paths, fb.paths);
   if (paths.length) {
     score += WEIGHTS.path;
     reasons.push(`shared endpoint ${paths.join(', ')}`);
   }
 
-  const codes = intersect(fa.codes, fb.codes);
   if (codes.length) {
     score += WEIGHTS.code;
     reasons.push(`shared error code ${codes.join(', ')}`);
   }
 
-  const words = intersect(fa.keywords, fb.keywords);
   if (words.length) {
     // Overlap coefficient rather than Jaccard: log lines differ in length a lot.
     const overlap = words.length / Math.min(fa.keywords.size, fb.keywords.size);

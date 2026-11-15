@@ -132,11 +132,20 @@ describe('unrelated events are not grouped', () => {
     expect(incidents.every((i) => i.correlation === 'isolated')).toBe(true);
   });
 
-  it('time proximity alone stays below the default threshold', () => {
+  it('time proximity alone is never a link', () => {
     const a = ev('a', 0, 'ERROR', 'alpha subsystem exploded');
     const b = ev('b', 0, 'ERROR', 'beta queue rejected message');
-    const score = scorePair(a, extractFeatures(a), b, extractFeatures(b), 5000)!;
-    expect(score.confidence).toBeLessThan(0.5);
+    expect(scorePair(a, extractFeatures(a), b, extractFeatures(b), 5000)).toBeNull();
+  });
+
+  it.each([0, 0.1, 0.3, 0.5])('stays unlinked at minConfidence %s, even with severity and a service mention', (min) => {
+    const events = [
+      ev('alpha-service', 0, 'ERROR', 'alpha subsystem exploded'),
+      ev('beta-service', 100, 'ERROR', 'beta queue rejected message from alpha-service'),
+    ];
+    const incidents = correlate(events, { windowMs: 5000, minConfidence: min });
+    expect(incidents).toHaveLength(2);
+    expect(incidents.every((i) => i.correlation === 'isolated')).toBe(true);
   });
 
   it('does not link similar errors outside the time window', () => {
@@ -151,7 +160,7 @@ describe('unrelated events are not grouped', () => {
     const a = ev('a', 0, 'ERROR', 'request failed with error');
     const b = ev('b', 0, 'ERROR', 'error: request failed');
     expect(extractFeatures(a).keywords.size).toBe(0);
-    expect(scorePair(a, extractFeatures(a), b, extractFeatures(b), 5000)!.confidence).toBeLessThan(0.5);
+    expect(scorePair(a, extractFeatures(a), b, extractFeatures(b), 5000)).toBeNull();
   });
 });
 
