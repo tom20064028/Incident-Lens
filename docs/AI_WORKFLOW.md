@@ -1,59 +1,211 @@
 # AI-assisted workflow
 
-> Draft written from the build session. Edit it in your own words before submitting.
+## Tools used
 
-## Tools
+- **ChatGPT** — requirement analysis, project exploration, technical design, and reviewing design/UX decisions.
+- **Claude Code (Claude Opus)** — implementation, testing, browser/Docker verification, and code review.
+- **Claude Code subagent** — separate read-only review of the first working implementation.
 
-- **ChatGPT**: scoping. It turned the take-home brief into a concrete project spec (stack, pipeline, test list, "no LLM yet").
-- **Claude Code (desktop app, Claude Opus)**: reviewed that spec against the submission requirements, then implemented, tested and verified the project. Verification covered the terminal, the built-in browser, and Docker.
+I also used the tools to check each other's output. ChatGPT's initial specification was reviewed by Claude before implementation; Claude's implementation and review findings were brought back to ChatGPT for further design review; later UX changes proposed during that review were implemented and verified again with Claude.
 
-## Key steps
+## Workflow
 
-1. **Spec review before coding.** I asked Claude Code to check whether the ChatGPT spec suited the test before building anything. It kept the scope but closed some gaps:
-   - The spec had no AI-workflow write-up or architecture diagram, both required by the submission, so those were added.
-   - "Plausible service relationship" was too vague, so it became "one service's message names the other".
-   - Heuristic weights became explicit, and the threshold was set so time proximity alone can never link two events.
-   - An incident was defined as a correlated group containing at least one ERROR or FATAL event.
-   - An "Analyze sample logs" button was added so reviewers can see it working in one click.
-   - The deployment is one Docker image, with Fastify serving the UI.
-2. **Pipeline first, UI second.** Parsing, normalization and correlation were built as pure functions behind `analyze()`. The API and UI are thin layers on top.
-3. **Sample data designed as test fixtures.** Four services in mixed formats, covering four scenarios:
-   - an exact trace-ID chain;
-   - a heuristic chain where inventory-service logs have no IDs;
-   - unrelated WARNs placed close in time to an incident, to tempt false grouping;
-   - one isolated error.
-4. **Tests, then reading the output.** 53 Vitest tests, plus a manual review of the generated incidents: confidences, reasons, and which events were left out.
+### 1. Understand the assignment and choose a project
 
-## How the result was checked
+I first used ChatGPT to review the take-home requirements and explore several manageable project ideas.
 
-- **The tests found real problems.** The first run had 2 failures:
-  - **A real parser bug:** in ECS-style logs `"service": {"name": ...}` is an object, and the parser took it as the service name (`[object Object]`). Fixed by accepting only primitive values for alias fields.
-  - **A wrong test:** a hand-computed epoch constant was incorrect. Replaced with `Date.UTC(...)`.
-- **The typecheck caught Fastify 5's `unknown` error type.**
-- **The scenario output was read by eye**, not only asserted:
-  - The heuristic incident's weakest link (0.56) is the DB-timeout match: same error code and a shared keyword, 1 s apart.
-  - Narrowing the window to 2 s splits that event into its own incident, which shows the setting has a real effect.
-- **Independent AI code review.** A separate subagent reviewed the code read-only and reproduced each finding before reporting it. It found 3 critical issues:
-  1. O(n²) heuristic pairing: 4,000 same-time errors in a ~300 KB file crashed Node with out-of-memory.
-  2. Nanosecond epoch timestamps crashed the request.
-  3. Regex time grew quadratically on very long lines.
+I compared them based on scope, technical depth, ease of demonstration, and how much engineering judgement they would allow me to show.
 
-  It also found 3 major issues: unknown text levels silently dropped, placeholder trace IDs merging unrelated events, and heuristic links chaining without limit.
-  - **Fixed:** all critical issues, the first two majors, and the cheap minors, each with a regression test (69 tests total).
-  - **Documented, not fixed:** transitive chaining, which needs a design decision rather than a quick patch.
-- **UI checked in a browser** with the sample scenario, including the expandable reasons on heuristic links.
-- **Docker image built and run:** the health check, sample analysis and static UI were checked inside the container. The build stage also runs the tests.
+I chose a multi-service log incident analyzer because it was small enough for the assignment while still involving parsing, normalization, event correlation, false-positive trade-offs, testing, and deployment.
+
+### 2. Design before coding
+
+I used ChatGPT to turn the idea into a technical specification covering:
+
+- Node.js and TypeScript;
+- a small React UI;
+- multi-file uploads;
+- NDJSON and conventional text logs;
+- normalization into a common event model;
+- exact correlation using `traceId` and `requestId`;
+- heuristic correlation when IDs are unavailable;
+- explicit evidence and scores for heuristic links;
+- Docker deployment;
+- automated tests.
+
+I reviewed and refined the design before handing it to Claude Code.
+
+### 3. Challenge the design
+
+One question I raised was:
+
+> What does this tool provide that I would not get by simply uploading the logs to an LLM and asking it to analyse them?
+
+That led to the main design principle:
+
+> Structure and correlate the evidence deterministically first. Any future AI interpretation should operate on top of that evidence.
+
+I therefore decided that:
+
+- exact trace/request IDs take priority over heuristics;
+- heuristic links must expose supporting evidence;
+- time proximity alone must never create a link;
+- inferred relationships must be labelled as heuristic;
+- runtime LLM analysis was not necessary for the first version.
+
+I initially considered an LLM-generated diagnosis layer, but rejected it for this submission because it increased scope without strengthening the main engineering demonstration.
+
+### 4. Implement with Claude Code
+
+Once the design was stable, I passed the specification to Claude Code and first asked it to review the spec against the assignment requirements.
+
+I accepted several refinements, including:
+
+- an architecture diagram and AI-workflow document;
+- a concrete incident definition: a correlated group containing at least one `ERROR` or `FATAL`;
+- explicit heuristic weights;
+- using one Docker image for the Fastify API and React UI;
+- bundled sample logs for immediate demonstration.
+
+Claude then implemented the parser, normalization pipeline, correlation engine, API, UI, tests, and Docker setup.
+
+### 5. Test and inspect the first implementation
+
+I did not treat generated code as complete simply because it compiled.
+
+Testing exposed issues including:
+
+- an ECS-style `service: { name: ... }` object being used directly as the service value, resulting in `[object Object]`;
+- an incorrectly hand-calculated epoch timestamp in a test;
+- a Fastify type-checking issue.
+
+I also inspected the actual incidents, scores and evidence rather than relying only on automated assertions.
+
+### 6. Run a separate code-review pass
+
+I asked a separate Claude subagent to review the first working implementation without modifying it first.
+
+It identified several failure modes, including:
+
+- heuristic pair comparisons becoming too expensive with thousands of simultaneous errors;
+- nanosecond epoch timestamps causing failures;
+- expensive regex processing on very long lines;
+- placeholder trace IDs joining unrelated events;
+- missing severity aliases;
+- transitive heuristic chaining.
+
+I delegated the initial triage and fixes, then reviewed the resulting changes and the decision to leave transitive chaining documented rather than adding an arbitrary rule.
+
+The bounded-processing changes included:
+
+- limiting each event to a fixed number of nearby comparison candidates;
+- limiting uploads and total event count;
+- truncating unusually long text lines before parsing;
+- limiting the amount of message text used for heuristic feature extraction.
+
+These controls trade some theoretical recall and input flexibility for predictable runtime and memory usage.
+
+### 7. Check the written design against the running system
+
+I later asked Claude to compare the written design principles with the actual running behaviour.
+
+This exposed an important mismatch.
+
+I had stated that:
+
+> Time proximity alone should never be enough to correlate two events.
+
+However, the first implementation only guaranteed that at the default score threshold of `0.5`. Lowering the threshold in the UI could cause unrelated events to be linked purely because they happened close together.
+
+I changed the implementation so that every heuristic link must first share at least one substantive evidence signal:
+
+- endpoint/path;
+- error code; or
+- meaningful keywords.
+
+Timing, severity and service-name mentions can increase the score, but cannot create a link by themselves.
+
+Regression tests now check this rule at several thresholds, including `0`.
+
+### 8. Review the interaction model
+
+During UI review I also found that uploaded files and bundled sample files followed two different workflows.
+
+Uploaded files appeared as a current batch, while the sample action bypassed that state and directly returned results.
+
+I simplified this into one model:
+
+> One analysis operates on one current batch of files.
+
+Sample logs are now loaded into the same file list as normal uploads and go through the same analysis API.
+
+Changing the current file batch clears the previous result, and **Clear files** resets the workspace.
+
+Tuning controls are hidden under **Advanced settings** because they are useful for inspecting the algorithm but are not part of the normal workflow.
+
+I also renamed **Minimum heuristic confidence** to **Minimum heuristic score**, and incident badges now display values such as `score 0.56` instead of `56%`.
+
+This reflects an important distinction: the score is a hand-tuned evidence score, not a calibrated probability.
+
+## Key trade-offs
+
+### False positives vs. false negatives
+
+The heuristic correlation is intentionally conservative.
+
+Incorrectly merging unrelated failures is more misleading than occasionally leaving a weakly related event uncorrelated.
+
+### Explainability vs. flexibility
+
+The heuristic weights are hand-picked prototype values.
+
+A score such as `0.56` does not mean a 56% probability that two events belong to the same incident. It is only a relative evidence score used to filter inferred relationships.
+
+In a production system I would calibrate the weights against labelled historical incidents.
+
+### Correlation recall vs. processing cost
+
+A fully pairwise comparison can grow quadratically with the number of candidate events.
+
+The implementation bounds comparisons and input processing so runtime remains predictable. This can potentially miss relationships in extremely dense log streams, but avoids unbounded resource usage in the take-home implementation.
+
+### Simplicity vs. production completeness
+
+The application processes uploaded files in memory and does not persist incidents.
+
+A production version would likely add persistent history, streaming ingestion, service topology information, and clock-skew handling.
+
+## Verification
+
+The project was checked using:
+
+- automated tests for parsing, normalization, exact and heuristic correlation, API behaviour, workspace state, and regression cases;
+- tests confirming that time-only events cannot link even at low heuristic-score thresholds;
+- manual inspection of incident timelines, scores, and evidence;
+- browser verification of sample loading, analysis, file removal, and workspace reset;
+- API upload testing;
+- Docker build and runtime verification;
+- a separate AI-assisted code-review pass followed by regression tests.
+
+The current test suite contains **84 automated tests**.
 
 ## Time spent
 
-- About X min reviewing the spec and making scoping decisions.
-- About 20 min of AI-driven implementation and verification.
-- About X min of my own review.
+Approximately:
 
-*(Fill in your actual numbers.)*
+- **30 minutes** understanding the requirements and comparing project directions;
+- **30 minutes** designing and refining the technical approach;
+- **25 minutes** for the initial Claude Code implementation to reach a working Docker build;
+- **about 2 hours** reviewing the result, running AI-assisted code reviews, fixing issues, refining UX, and verifying the final behaviour.
+
+Total working time was approximately **3.5 hours**.
 
 ## What I would do next
 
-- Clock-skew tolerance per service, and a dependency map supplied by the user (stronger than name mentions).
-- Streaming parse for large files.
-- LLM-assisted summaries layered **on top of** the deterministic incidents, with the evidence (event IDs) cited.
+If continuing the project, I would investigate:
+
+1. a more deliberate solution to transitive heuristic chaining;
+2. service-specific clock-skew tolerance;
+3. a configurable service dependency map;
+4. streaming parsing for larger log volumes;
+5. LLM-assisted incident summaries and investigation suggestions layered on top of the deterministic evidence, with supporting event IDs cited in generated conclusions.
