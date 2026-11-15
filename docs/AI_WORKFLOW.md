@@ -143,7 +143,7 @@ Changing the current file batch clears the previous result, and **Clear files** 
 
 Tuning controls are hidden under **Advanced settings** because they are useful for inspecting the algorithm but are not part of the normal workflow.
 
-I also renamed **Minimum heuristic confidence** to **Minimum heuristic score**, and incident badges now display values such as `score 0.56` instead of `56%`.
+I also renamed **Minimum heuristic confidence** to **Minimum heuristic score**, and incident badges now display values such as `min score 0.56` instead of `56%`.
 
 This reflects an important distinction: the score is a hand-tuned evidence score, not a calibrated probability.
 
