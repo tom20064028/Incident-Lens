@@ -60,6 +60,15 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
   app.get('/api/samples', async () => readSamples(config.samplesDir).map((f) => f.name));
 
+  // Raw sample content, so the UI can load samples into its file batch like any upload.
+  // Only names from the directory listing are served, which rules out path traversal.
+  app.get<{ Params: { name: string } }>('/api/samples/:name', async (req, reply) => {
+    const sample = readSamples(config.samplesDir).find((f) => f.name === req.params.name);
+    if (!sample) return reply.status(404).send({ error: 'Sample not found' });
+    return reply.type('text/plain; charset=utf-8').send(sample.content);
+  });
+
+  // Kept for API compatibility and scripted demos; the UI uses the normal upload path.
   app.post('/api/analyze/samples', async (req) => analyze(readSamples(config.samplesDir), req.query ?? {}));
 
   if (config.webDir && fs.existsSync(config.webDir)) {

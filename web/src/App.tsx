@@ -1,5 +1,6 @@
-import { useState, type DragEvent } from 'react';
-import { analyzeFiles, analyzeSamples, type AnalysisResult, type Incident, type Membership, type Options } from './api';
+import { useReducer, useState, type DragEvent } from 'react';
+import { analyzeFiles, loadSampleFiles, type Incident, type Membership, type Options } from './api';
+import { initialWorkspace, workspaceReducer } from './workspace';
 
 const SERVICE_COLORS = ['#2a78d6', '#1baa7a', '#9a5bd8', '#e0812b', '#d84a7a', '#3b9fb5', '#8a8f2d'];
 
@@ -9,14 +10,14 @@ function serviceColor(service: string, services: string[]): string {
 }
 
 const time = (iso: string) => iso.slice(11, 23);
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+const score = (n: number) => n.toFixed(2);
 
 function CorrelationBadge({ incident }: { incident: Incident }) {
   if (incident.correlation === 'exact') return <span className="badge exact">exact</span>;
   if (incident.correlation === 'isolated') return <span className="badge isolated">single event</span>;
   return (
-    <span className="badge heuristic" title="Weakest inferred link in this incident">
-      heuristic · min {pct(incident.confidence ?? 0)}
+    <span className="badge heuristic" title="Weakest inferred link in this incident (evidence score, not a probability)">
+      heuristic · min score {score(incident.confidence ?? 0)}
     </span>
   );
 }
@@ -27,7 +28,7 @@ function MembershipCell({ m }: { m: Membership }) {
   return (
     <details className="membership">
       <summary>
-        <span className="badge heuristic">heuristic · {pct(m.confidence)}</span>
+        <span className="badge heuristic">heuristic · score {score(m.confidence)}</span>
         {m.key && <span className="badge exact subtle">{m.key}</span>}
       </summary>
       <div className="reasons">
@@ -101,32 +102,44 @@ function IncidentDetail({ incident, services }: { incident: Incident; services: 
 }
 
 export function App() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [{ files, result, selected, error }, dispatch] = useReducer(workspaceReducer, initialWorkspace);
   const [options, setOptions] = useState<Options>({ windowMs: 5000, minConfidence: 0.5 });
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState<'analyzing' | 'loading-samples' | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  const addFiles = (list: FileList | null) => {
-    if (!list) return;
-    const incoming = Array.from(list);
-    setFiles((prev) => [...prev.filter((p) => !incoming.some((f) => f.name === p.name)), ...incoming]);
+  const addFiles = (list: FileList | File[] | null) => {
+    setLoadError(null);
+    if (list) dispatch({ type: 'addFiles', files: Array.from(list) });
   };
 
-  const run = async (fn: () => Promise<AnalysisResult>) => {
-    setLoading(true);
-    setError(null);
+  const loadSamples = async () => {
+    setBusy('loading-samples');
+    setLoadError(null);
     try {
-      const r = await fn();
-      setResult(r);
-      setSelected(r.incidents[0]?.id ?? null);
+      dispatch({ type: 'addFiles', files: await loadSampleFiles() });
     } catch (e) {
-      setError((e as Error).message);
+      setLoadError(`Could not load sample logs: ${(e as Error).message}`);
     } finally {
-      setLoading(false);
+      setBusy(null);
     }
+  };
+
+  const analyze = async () => {
+    const batch = files;
+    setBusy('analyzing');
+    try {
+      dispatch({ type: 'analyzed', batch, result: await analyzeFiles(batch, options) });
+    } catch (e) {
+      dispatch({ type: 'failed', batch, error: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const clear = () => {
+    setLoadError(null);
+    dispatch({ type: 'clear' });
   };
 
   const onDrop = (e: DragEvent) => {
@@ -137,6 +150,7 @@ export function App() {
 
   const services = result ? [...new Set(result.incidents.flatMap((i) => i.services))].sort() : [];
   const current = result?.incidents.find((i) => i.id === selected);
+  const shownError = loadError ?? error;
 
   return (
     <div className="app">
@@ -155,16 +169,32 @@ export function App() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
-          <input type="file" multiple onChange={(e) => addFiles(e.target.files)} />
+          <input
+            type="file"
+            multiple
+            onChange={(e) => {
+              addFiles(e.target.files);
+              e.target.value = ''; // allow choosing the same file again after removing it
+            }}
+          />
           <strong>Drop log files here</strong> or click to choose · NDJSON or text · filename = service name
         </label>
+
+        <div className="batch-header">
+          <span className="muted small">
+            {files.length === 0 ? 'No files in this analysis yet.' : `Current analysis: ${files.length} file${files.length === 1 ? '' : 's'}`}
+          </span>
+          <button className="link" disabled={busy !== null} onClick={loadSamples}>
+            {busy === 'loading-samples' ? 'Loading samples…' : 'Load sample logs'}
+          </button>
+        </div>
 
         {files.length > 0 && (
           <ul className="files">
             {files.map((f) => (
               <li key={f.name}>
                 {f.name} <span className="muted">({(f.size / 1024).toFixed(1)} KB)</span>
-                <button className="link" onClick={() => setFiles(files.filter((x) => x !== f))}>
+                <button className="link" onClick={() => dispatch({ type: 'removeFile', name: f.name })}>
                   remove
                 </button>
               </li>
@@ -172,36 +202,45 @@ export function App() {
           </ul>
         )}
 
+        <details className="advanced">
+          <summary>Advanced settings</summary>
+          <div className="controls">
+            <label>
+              Time window (ms)
+              <input
+                type="number"
+                min={100}
+                step={500}
+                value={options.windowMs}
+                onChange={(e) => setOptions({ ...options, windowMs: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              Minimum heuristic score
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={options.minConfidence}
+                onChange={(e) => setOptions({ ...options, minConfidence: Number(e.target.value) })}
+              />
+            </label>
+          </div>
+          <p className="muted small">
+            Heuristic score is a hand-tuned evidence score, not a probability. Press Analyze again after changing these.
+          </p>
+        </details>
+
         <div className="controls">
-          <label>
-            Time window (ms)
-            <input
-              type="number"
-              min={100}
-              step={500}
-              value={options.windowMs}
-              onChange={(e) => setOptions({ ...options, windowMs: Number(e.target.value) })}
-            />
-          </label>
-          <label>
-            Min heuristic confidence
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={options.minConfidence}
-              onChange={(e) => setOptions({ ...options, minConfidence: Number(e.target.value) })}
-            />
-          </label>
-          <button className="primary" disabled={loading || files.length === 0} onClick={() => run(() => analyzeFiles(files, options))}>
-            {loading ? 'Analyzing…' : 'Analyze'}
+          <button className="primary" disabled={busy !== null || files.length === 0} onClick={analyze}>
+            {busy === 'analyzing' ? 'Analyzing…' : 'Analyze'}
           </button>
-          <button disabled={loading} onClick={() => run(() => analyzeSamples(options))}>
-            Analyze sample logs
+          <button disabled={busy !== null || (files.length === 0 && !result && !shownError)} onClick={clear}>
+            Clear files
           </button>
         </div>
-        {error && <p className="error">{error}</p>}
+        {shownError && <p className="error">{shownError}</p>}
       </section>
 
       {result && (
@@ -247,7 +286,7 @@ export function App() {
                   <button
                     key={inc.id}
                     className={`incident ${inc.id === selected ? 'active' : ''}`}
-                    onClick={() => setSelected(inc.id)}
+                    onClick={() => dispatch({ type: 'select', id: inc.id })}
                   >
                     <div className="row">
                       <b>{inc.id}</b>

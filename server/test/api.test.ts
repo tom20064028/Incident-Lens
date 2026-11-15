@@ -64,6 +64,33 @@ describe('POST /api/analyze', () => {
   });
 });
 
+describe('GET /api/samples/:name', () => {
+  it('lists samples and serves each one as raw text', async () => {
+    const names = (await app.inject({ method: 'GET', url: '/api/samples' })).json<string[]>();
+    expect(names).toEqual(['api-gateway.log', 'inventory-service.log', 'order-service.jsonl', 'payment-service.jsonl']);
+    const res = await app.inject({ method: 'GET', url: '/api/samples/api-gateway.log' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toMatch(/^text\/plain/);
+    expect(res.body).toMatch(/^2026-11-10T08:15:00\.012Z INFO/);
+  });
+
+  it('returns 404 for unknown names and path traversal attempts', async () => {
+    for (const url of ['/api/samples/nope.log', '/api/samples/..%2Fpackage.json', '/api/samples/%2E%2E']) {
+      expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404);
+    }
+  });
+
+  it('uploading the served samples gives the same result as the samples endpoint', async () => {
+    const names = (await app.inject({ method: 'GET', url: '/api/samples' })).json<string[]>();
+    const files = await Promise.all(
+      names.map(async (name) => ({ name, content: (await app.inject({ method: 'GET', url: `/api/samples/${name}` })).body })),
+    );
+    const uploaded = (await app.inject({ method: 'POST', url: '/api/analyze', ...multipart(files) })).json<AnalysisResult>();
+    const direct = (await app.inject({ method: 'POST', url: '/api/analyze/samples' })).json<AnalysisResult>();
+    expect(uploaded.incidents).toEqual(direct.incidents);
+  });
+});
+
 describe('bundled sample scenario (end to end)', () => {
   let result: AnalysisResult;
   beforeAll(async () => {

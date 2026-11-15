@@ -91,3 +91,10 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 0
 .membership summary { cursor: pointer; list-style: none; }
 .membership .reasons { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .membership ul { margin: 4px 0 0; padding-left: 16px; }
+
+.batch-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.batch-header button.link { font-size: 13px; padding: 0; }
+.advanced { margin-top: 14px; font-size: 13px; }
+.advanced summary { cursor: pointer; color: var(--muted); }
+.advanced .controls { margin-top: 10px; }
+.advanced p { margin: 8px 0 0; }

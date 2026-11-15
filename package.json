@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build -w web && npm run build -w server",
-    "test": "npm test -w server",
+    "test": "npm test -w server && npm test -w web",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "start": "npm start -w server"
